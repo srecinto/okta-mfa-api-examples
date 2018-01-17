@@ -1,0 +1,17 @@
+{% extends "_template.html" %} 
+{% block title %}Home{% endblock %} 
+{% block content %}
+<input type='checkbox' id='form-switch'>
+<div id='login-form'>
+    <input type="text" placeholder="Username" required>
+    <input type="password" placeholder="Password" required>
+    <button type='submit'>Login</button>
+    <label for='form-switch'><span>Forgot Password</span></label>
+</div>
+<div id='forgotpassword-form'>
+    <div></div>
+    <input type="email" placeholder="Email" required>
+    <button type='submit'>Forgot Password</button>
+    <label for='form-switch'>Back to Login</label>
+</div>
+{% endblock %}

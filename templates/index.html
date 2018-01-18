@@ -129,7 +129,7 @@ You are logged in <a href="{{okta_config.app_host}}/logout">Logout</a>
 				if(responseData.factorResult == "SUCCESS") {
 					console.log("Factor passed!");
 
-					$("#ott").val(ott);
+					$("#ott").val(responseData.ott);
 					$("#changePassword").submit();
 					
 				} else if (responseData.factorResult == "WAITING") {

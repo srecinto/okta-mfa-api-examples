@@ -1,0 +1,234 @@
+{% extends "_template.html" %} 
+{% block title %}Home{% endblock %} 
+{% block content %}
+{% if is_logged_in %}
+You are logged in <a href="{{okta_config.app_host}}/logout">Logout</a>
+{% else %}
+<script type="text/javascript" src="{{okta_config.org_host}}/api/v1/sessions/me"></script>
+<script>
+    //<![CDATA[
+    $(document).ready(function() {
+        console.log("Ready!!!");
+        $.get({
+            url: "{{okta_config.org_host}}/api/v1/sessions/me",
+            xhrFields: { withCredentials: true },
+            crossDomain: true,
+            success: data => {
+                console.log("data: %s", JSON.stringify(data));
+                var redirectUrl = "{{okta_config.redirect_url|safe}}";
+                console.log("redirect_url: %s", redirectUrl)
+                if (data.id) {
+                    location.href = redirectUrl;
+                }
+            }
+        });
+        
+        $("#factorList").on("change", onChangeFactorList);
+        
+        $(".close").on("click", function(){
+            console.log("modal close button clicked");
+			$("#modalPopup").hide();
+		});
+		
+		$("#forgot-password-button").on("click", function() {
+		    console.log("forgot-password-button clicked");
+		    // first get the username/email and look up the user in Okta
+		    // Display factors available for the user to use
+		    console.log("email: " + $("#email").val());
+		    
+		    $("#modalPopup").show();
+		});
+    });
+    
+    function onChangeFactorList(event) {
+		console.log("onChangeFactorList()");
+		// console.log(event);
+		
+		$("#smsModalContent").hide();
+		$("#googleAuthModalContent").hide();
+		$("#oktaVerifyModalContent").hide();
+		$("#oktaVerifyPushModalContent").hide();
+		$("#voiceModalContent").hide();
+		
+		var seletedFactorVal = $("#factorList").val();
+		
+		$("#oktaFactorType").val(seletedFactorVal);
+		
+		if(seletedFactorVal == "GOOGLE") {
+			displayMFAGoogleAuth();
+		} else if(seletedFactorVal == "sms") {
+			displayMFASMS();
+		} else if(seletedFactorVal == "push") {
+			displayMFAOktaVerifyPush();
+		} else if(seletedFactorVal == "token:software:totp") {
+			displayMFAOktaVerify();
+		} else if(seletedFactorVal == "call") {
+			displayMFAVoice();
+		}
+	}
+    
+    function displayMFAGoogleAuth() {
+		console.log("displayMFAGoogleAuth()");
+		$("#googleAuthModalContent").show();
+	}
+	
+	function displayMFASMS() {
+		console.log("displayMFASMS()");
+		$("#smsModalContent").show();
+	}
+	
+	function displayMFAVoice() {
+		console.log("displayMFAVoice()");
+		$("#voiceModalContent").show();
+	}
+	
+	function displayMFAOktaVerifyPush() {
+		console.log("displayMFAOktaVerifyPush()");
+		$("#oktaVerifyPushModalContent").show();
+	}
+	
+	function displayMFAOktaVerify() {
+		console.log("displayMFAOktaVerify()");
+		$("#oktaVerifyModalContent").show();
+	}
+	
+	function requestCode() {
+		console.log("requestCode()");
+		oktaMFARequest = {
+			"username": $("#username").val(),
+			"factorType": $("#oktaFactorType").val()
+		}
+		$.ajax({
+			url: "{{config.app_host}}/push_mfa_code",
+			type: "POST",
+			data: JSON.stringify(oktaMFARequest),
+			contentType: "application/json",
+			dataType: "json",
+			success: function(responseData) {
+				console.log(responseData);
+			}
+		});
+		
+	}
+	
+	function submitCode(code) {
+		console.log("submitCode()");
+		oktaMFARequest = {
+			"username": $("#username").val(),
+			"factorType": $("#oktaFactorType").val(),
+			"code": code
+		}
+		$.ajax({
+			url: "{{config.app_host}}/push_mfa_code",
+			type: "POST",
+			data: JSON.stringify(oktaMFARequest),
+			contentType: "application/json",
+			dataType: "json",
+			success: function(responseData) {
+				console.log(responseData);
+				if(responseData.factorResult == "SUCCESS") {
+					console.log("Factor passed!");
+
+					$("#ott").val(ott);
+					$("#changePassword").submit();
+					
+				} else if (responseData.factorResult == "WAITING") {
+					//Poll until result comes back
+					pollingUrl = responseData.pollingUrl;
+					pollOktaVerifyPushMFA(pollingUrl, $("#username").val());
+				} else {
+					alert("Incorrect Factor Pass Code");
+				}
+			}
+		});
+	}
+	
+	function pollOktaVerifyPushMFA(pollingUrl, userName) {
+		console.log("pollOktaVerifyPushMFA()");
+		body = {
+			"pollingUrl": pollingUrl,
+			"userName": userName
+		};
+		
+		$.ajax({
+			url: "{{config.app_host}}/mfa_verification_poll", 
+			type: "POST",
+			data: JSON.stringify(body),
+			contentType: "application/json",
+			dataType: "json",
+			success: function(requestData) {
+				console.log(requestData);
+				if(requestData.factorResult == "WAITING") {
+					setTimeout(pollOktaVerifyPushMFA(pollingUrl, userName), 3000);
+				} else if (requestData.factorResult == "SUCCESS") {
+					console.log("Factor passed!");
+					console.log(requestData);
+					$("#ott").val(requestData.ott);
+					$("#changePassword").submit();
+				} else {
+					alert("Failed factor!");
+				}
+			}
+		});
+	}
+    //]]>
+</script>
+<input type="checkbox" id="form-switch">
+<form id="login-form" method="POST" action="/login">
+    <input type="text" name="username" placeholder="Username" required>
+    <input type="password" name="password" placeholder="Password" required>
+    <button type="submit">Login</button>
+    <label for="form-switch"><span>Forgot Password</span></label>
+</form>
+<div id="forgotpassword-form">
+    <div></div>
+    <input id="username" type="text" placeholder="User Name" required>
+    <button type="button" id="forgot-password-button">Forgot Password</button>
+    <label for="form-switch">Back to Login</label>
+</div>
+<form id="changePassword" method="POST" action="/show_change_password">
+    <input type="hidden" name="ott" id="ott"/>
+</form>
+<!-- The MFA Modal -->
+<div id="modalPopup" class="modal">
+
+<!-- Modal content -->
+<div class="modal-content">
+<span class="close">&times;</span>
+<p>Login requirs MFA Challenge</p>
+<div>
+    <select id="factorList">
+        <option value="" default>Select Password Reset Factor</option>
+        <option value="token:software:totp">Okta Verify Code</option>
+        <option value="push">Okta Verify Push</option>
+        <option value="GOOGLE">Google Authenticator</option>
+        <option value="sms">SMS</option>
+        <option value="call">Voice</option>
+    </select>
+</div>
+<br />
+<div id="modalContent">
+    <div id="smsModalContent" class="modalContent">
+        <div><input id="smsRequest" type="button" value="Send Code" onclick="requestCode()" /><input type="text" id="smsCode" /></div>
+        <div><input id="smsSubmit" type="button" value="Submit Code" onclick="submitCode(document.getElementById('smsCode').value)" /></div>
+    </div>
+    <div id="googleAuthModalContent" class="modalContent">
+        <div><input type="text" id="googleAuthCode" /></div>
+        <div><input id="googleAuthSubmit" type="button" value="Submit Code" onclick="submitCode(document.getElementById('googleAuthCode').value)" /></div>
+    </div>
+    <div id="oktaVerifyModalContent" class="modalContent">
+        <div><input type="text" id="oktaVerifyCode" /></div>
+        <div><input id="OktaVerifySubmit" type="button" value="Submit Code" onclick="submitCode(document.getElementById('oktaVerifyCode').value)" /></div>
+    </div>
+    <div id="oktaVerifyPushModalContent" class="modalContent">
+        <div><input id="oktaVerifyPushSubmit" type="button" value="Send Push" onclick="submitCode('')" /></div>
+    </div>
+    <div id="voiceModalContent" class="modalContent">
+        <div><input id="voiceRequest" type="button" value="Call for Code" onclick="requestCode()" /><input type="text" id="voiceCode" /></div>
+        <div><input id="voiceSubmit" type="button" value="Submit Code" onclick="submitCode(document.getElementById('voiceCode').value)" /></div>
+    </div>
+</div>
+<input type="hidden" id="oktaFactorType" name="oktaFactorType" />
+</div>
+{% endif %}
+{% endblock %}

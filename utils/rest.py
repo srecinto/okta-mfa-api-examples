@@ -109,9 +109,13 @@ class OktaUtil:
         body = {}
         return self.execute_get(url, body)
 
-    def push_factor_verification(self, user_id, factor_id):
+    def push_factor_verification(self, user_id, factor_id, passCode=None):
         url = "{host}/api/v1/users/{user_id}/factors/{factor_id}/verify".format(host=self.REST_HOST, user_id=user_id, factor_id=factor_id)
         body = {}
+        
+        if passCode:
+            body["passCode"] = passCode
+
         return self.execute_post(url, body)
 
     def factor_verification(self, verify_url, verification_Value):
@@ -199,6 +203,23 @@ class OktaUtil:
         body = {}
 
         return self.execute_get(url, body)
+    
+    
+    def reset_user_password(self, user_id):
+        url = "{host}/api/v1/users/{user_id}/lifecycle/reset_password?sendEmail=false".format(host=self.REST_HOST, user_id=user_id)
+        body = {}
+
+        return self.execute_post(url, body)
+    
+    
+    def verify_password_reset_token(self, token):
+        url = "{host}/api/v1/authn/recovery/token".format(host=self.REST_HOST)
+        body = {
+            "recoveryToken": token
+        }
+
+        return self.execute_post(url, body)
+        
 
     def assign_user_to_group(self, user_id, group_id):
         print "assign_user_to_group()"

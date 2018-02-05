@@ -80,6 +80,6 @@ For an idea how the Password Rester MFA flow works, please review the following 
 * change_password - Verifies the password reset ott then verifies the change password matches the confirm password, then updates the new password on the user profile
 * push_mfa_code - pushes the MFA request based on the MFA type i.e. SMS will send the OTP via SMS text, it also verifies the otp and return an ott upon successful verification_Value
 * mfa_verification_poll - Will make a request to check if the Okta Verify Push notification has completed and return the results.  This endpoint can be polled continuously.
-* 
+
 
 

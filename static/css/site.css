@@ -1,4 +1,4 @@
-input {
+input[type="text"], input[type="password"] {
     margin-bottom: 3px;
     padding: 10px;
     width: 100%;
@@ -42,6 +42,16 @@ label {
 
 #form-switch:checked~#login-form {
     display: none;
+}
+
+.inline-field input {
+    width: 15px !important;
+}
+
+.inline-field label {
+    display: inline-block;
+    margin-bottom: 0; 
+    vertical-align: middle; 
 }
 
 /* The Modal (background) */

@@ -23,11 +23,14 @@ You are logged in <a href="{{okta_config.app_host}}/logout">Logout</a>
             }
         });
         
+        $("#login").on("click", onLogin);
+        
         $("#factorList").on("change", onChangeFactorList);
         
         $(".close").on("click", function(){
             console.log("modal close button clicked");
 			$("#modalPopup").hide();
+			$("#multiSMSMFAModal").hide();
 		});
 		
 		$("#forgot-password-button").on("click", function() {
@@ -39,6 +42,19 @@ You are logged in <a href="{{okta_config.app_host}}/logout">Logout</a>
 		    $("#modalPopup").show();
 		});
     });
+    
+    function onLogin() {
+    	console.log("onLogin()");
+    	
+    	if($("#multiSms").is(":checked")) {
+    		console.log("show multi sms mfa");
+    		
+    		renderSMSNumberList($("#login_username").val());
+    		
+    	} else {
+    		$("#login-form").submit();
+    	}
+    }
     
     function onChangeFactorList(event) {
 		console.log("onChangeFactorList()");
@@ -92,6 +108,26 @@ You are logged in <a href="{{okta_config.app_host}}/logout">Logout</a>
 		$("#oktaVerifyModalContent").show();
 	}
 	
+	function requestMultiSmsCode() {
+		console.log("requestMultiSmsCode()");
+		oktaMultiSMSMFARequest = {
+			"username": $("#login_username").val(),
+			"smsNumber": $("#approvedSMSNumbersList").val() //NOTE: this gets checked on the server side to make sure it is a valid number
+		}
+		
+		$.ajax({
+			url: "{{config.app_host}}/push_multi_sms_mfa_code",
+			type: "POST",
+			data: JSON.stringify(oktaMultiSMSMFARequest),
+			contentType: "application/json",
+			dataType: "json",
+			success: function(responseData) {
+				console.log(responseData);
+				$("#ott").val(responseData.verifyUrl);
+			}
+		});
+	}
+	
 	function requestCode() {
 		console.log("requestCode()");
 		oktaMFARequest = {
@@ -143,6 +179,38 @@ You are logged in <a href="{{okta_config.app_host}}/logout">Logout</a>
 		});
 	}
 	
+	function submitSubmitMultiCode(code) {
+		console.log("submitSubmitMultiCode()");
+		$("#username").val($("#login_username").val()); //Default to user name entered at login
+		oktaMFARequest = {
+			"username": $("#username").val(),
+			"factorType": "sms",
+			"code": code,
+			"verificationUrl": $("#ott").val()
+		}
+		$.ajax({
+			url: "{{config.app_host}}/push_mfa_code_no_reset",
+			type: "POST",
+			data: JSON.stringify(oktaMFARequest),
+			contentType: "application/json",
+			dataType: "json",
+			success: function(responseData) {
+				console.log(responseData);
+				if(responseData.factorResult == "SUCCESS") {
+					console.log("Factor passed!");
+					$("#login-form").submit();
+					
+				} else if (responseData.factorResult == "WAITING") {
+					//Poll until result comes back
+					pollingUrl = responseData.pollingUrl;
+					pollOktaVerifyPushMFA(pollingUrl, $("#username").val());
+				} else {
+					alert("Incorrect Factor Pass Code");
+				}
+			}
+		});
+	}
+	
 	function pollOktaVerifyPushMFA(pollingUrl, userName) {
 		console.log("pollOktaVerifyPushMFA()");
 		body = {
@@ -171,14 +239,54 @@ You are logged in <a href="{{okta_config.app_host}}/logout">Logout</a>
 			}
 		});
 	}
+	
+	function renderSMSNumberList(userName) {
+		
+		$.ajax({
+			url: "{{config.app_host}}/mfa_multiple_sms_numbers", 
+			type: "POST",
+			data: JSON.stringify({"userName": userName}),
+			contentType: "application/json",
+			dataType: "json",
+			success: function(requestData) {
+				console.log(requestData);
+				
+				$("#approvedSMSNumbersList").find('option').remove();
+				
+				if(requestData.available_sms_numbers.length == 0) {
+					$("#approvedSMSNumbersList").append($("<option></option>"));
+				} else {
+				
+					for(i in requestData.available_sms_numbers){
+						currentSmsNumber = requestData.available_sms_numbers[i]
+						option = $("<option>No numbers registered</option>")
+									.attr("value",currentSmsNumber)
+	                    			.text(currentSmsNumber);
+	                    			
+						if(currentSmsNumber == requestData.primary_sms) {
+							option.attr("selected", "true");
+						}
+						
+						$("#approvedSMSNumbersList").append(option);
+					}
+				}
+				
+				$("#multiSMSMFAModal").show();
+			}
+		});
+	}
     //]]>
 </script>
 <input type="checkbox" id="form-switch">
 <form id="login-form" method="POST" action="/login">
-    <input type="text" name="username" placeholder="Username" required>
+    <input id="login_username" type="text" name="username" placeholder="Username" required>
     <input type="password" name="password" placeholder="Password" required>
-    <button type="submit">Login</button>
+    <button type="button" id="login">Login</button>
     <label for="form-switch"><span>Forgot Password</span></label>
+    <div class="inline-field">
+    	<input type="checkbox" id="multiSms" value="multiSms" />
+    	<label for="multiSms">Show Multi SMS at login</label>
+    </div>
 </form>
 <div id="forgotpassword-form">
     <div></div>
@@ -189,46 +297,69 @@ You are logged in <a href="{{okta_config.app_host}}/logout">Logout</a>
 <form id="changePassword" method="POST" action="/show_change_password">
     <input type="hidden" name="ott" id="ott"/>
 </form>
+
 <!-- The MFA Modal -->
 <div id="modalPopup" class="modal">
 
-<!-- Modal content -->
-<div class="modal-content">
-<span class="close">&times;</span>
-<p>Login requirs MFA Challenge</p>
-<div>
-    <select id="factorList">
-        <option value="" default>Select Password Reset Factor</option>
-        <option value="token:software:totp">Okta Verify Code</option>
-        <option value="push">Okta Verify Push</option>
-        <option value="GOOGLE">Google Authenticator</option>
-        <option value="sms">SMS</option>
-        <option value="call">Voice</option>
-    </select>
+	<!-- Modal content -->
+	<div class="modal-content">
+		<span class="close">&times;</span>
+		<p>Login requires MFA Challenge</p>
+		<div>
+		    <select id="factorList">
+		        <option value="" default>Select Password Reset Factor</option>
+		        <option value="token:software:totp">Okta Verify Code</option>
+		        <option value="push">Okta Verify Push</option>
+		        <option value="GOOGLE">Google Authenticator</option>
+		        <option value="sms">SMS</option>
+		        <option value="call">Voice</option>
+		    </select>
+		</div>
+		<br />
+		<div id="modalContent">
+		    <div id="smsModalContent" class="modalContent">
+		        <div><input id="smsRequest" type="button" value="Send Code" onclick="requestCode()" /><input type="text" id="smsCode" /></div>
+		        <div><input id="smsSubmit" type="button" value="Submit Code" onclick="submitCode(document.getElementById('smsCode').value)" /></div>
+		    </div>
+		    <div id="googleAuthModalContent" class="modalContent">
+		        <div><input type="text" id="googleAuthCode" /></div>
+		        <div><input id="googleAuthSubmit" type="button" value="Submit Code" onclick="submitCode(document.getElementById('googleAuthCode').value)" /></div>
+		    </div>
+		    <div id="oktaVerifyModalContent" class="modalContent">
+		        <div><input type="text" id="oktaVerifyCode" /></div>
+		        <div><input id="OktaVerifySubmit" type="button" value="Submit Code" onclick="submitCode(document.getElementById('oktaVerifyCode').value)" /></div>
+		    </div>
+		    <div id="oktaVerifyPushModalContent" class="modalContent">
+		        <div><input id="oktaVerifyPushSubmit" type="button" value="Send Push" onclick="submitCode('')" /></div>
+		    </div>
+		    <div id="voiceModalContent" class="modalContent">
+		        <div><input id="voiceRequest" type="button" value="Call for Code" onclick="requestCode()" /><input type="text" id="voiceCode" /></div>
+		        <div><input id="voiceSubmit" type="button" value="Submit Code" onclick="submitCode(document.getElementById('voiceCode').value)" /></div>
+		    </div>
+		</div>
+		<input type="hidden" id="oktaFactorType" name="oktaFactorType" />
+	</div>
 </div>
-<br />
-<div id="modalContent">
-    <div id="smsModalContent" class="modalContent">
-        <div><input id="smsRequest" type="button" value="Send Code" onclick="requestCode()" /><input type="text" id="smsCode" /></div>
-        <div><input id="smsSubmit" type="button" value="Submit Code" onclick="submitCode(document.getElementById('smsCode').value)" /></div>
-    </div>
-    <div id="googleAuthModalContent" class="modalContent">
-        <div><input type="text" id="googleAuthCode" /></div>
-        <div><input id="googleAuthSubmit" type="button" value="Submit Code" onclick="submitCode(document.getElementById('googleAuthCode').value)" /></div>
-    </div>
-    <div id="oktaVerifyModalContent" class="modalContent">
-        <div><input type="text" id="oktaVerifyCode" /></div>
-        <div><input id="OktaVerifySubmit" type="button" value="Submit Code" onclick="submitCode(document.getElementById('oktaVerifyCode').value)" /></div>
-    </div>
-    <div id="oktaVerifyPushModalContent" class="modalContent">
-        <div><input id="oktaVerifyPushSubmit" type="button" value="Send Push" onclick="submitCode('')" /></div>
-    </div>
-    <div id="voiceModalContent" class="modalContent">
-        <div><input id="voiceRequest" type="button" value="Call for Code" onclick="requestCode()" /><input type="text" id="voiceCode" /></div>
-        <div><input id="voiceSubmit" type="button" value="Submit Code" onclick="submitCode(document.getElementById('voiceCode').value)" /></div>
-    </div>
-</div>
-<input type="hidden" id="oktaFactorType" name="oktaFactorType" />
+
+<!-- Modal Multi SMS Numbers -->
+<div id="multiSMSMFAModal" class="modal">
+		<!-- Modal content -->
+	<div class="modal-content">
+		<span class="close">&times;</span>
+		<p>Login requirs MFA Challenge</p>
+		<div>
+		    <select id="approvedSMSNumbersList">
+		        <option value="" default>No numbers registered</option>
+		    </select>
+		</div>
+		<br />
+		<div id="modalMultiSMSContent">
+			<div id="multiSmsModalContent">
+		        <div><input id="multiSmsRequest" type="button" value="Send Code" onclick="requestMultiSmsCode()" /><input type="text" id="multiSmsCode" /></div>
+		        <div><input id="multiSubmit" type="button" value="Submit Code" onclick="submitSubmitMultiCode(document.getElementById('multiSmsCode').value)" /></div>
+		    </div>
+		</div>
+	</div>
 </div>
 {% endif %}
 {% endblock %}

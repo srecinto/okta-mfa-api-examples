@@ -108,6 +108,21 @@ class OktaUtil:
         url = "{host}/api/v1/users/{user_id}/factors/{factor_id}".format(host=self.REST_HOST, user_id=user_id, factor_id=factor_id)
         body = {}
         return self.execute_get(url, body)
+    
+    def unenroll_factor(self, user_id, factor_id):
+        url = "{host}/api/v1/users/{user_id}/factors/{factor_id}".format(host=self.REST_HOST, user_id=user_id, factor_id=factor_id)
+        body = {}
+        self.execute_delete(url, body)
+        return {"success": True}
+    
+    def activate_sms_factor_by_id(self, factor_id, pass_code=None):
+        url = "{host}/api/v1/authn/factors/{factor_id}/lifecycle/activate".format(host=self.REST_HOST, factor_id=factor_id)
+        body = {}
+        
+        if pass_code:
+            body["passCode"] = pass_code
+
+        return self.execute_post(url, body)
 
     def push_factor_verification(self, user_id, factor_id, passCode=None):
         url = "{host}/api/v1/users/{user_id}/factors/{factor_id}/verify".format(host=self.REST_HOST, user_id=user_id, factor_id=factor_id)
@@ -577,7 +592,7 @@ class OktaUtil:
             "nonce=n-0S6_WzA2Mj&"
             "response_mode=form_post&"
             "prompt=none&"
-            "scope=openid"
+            "scope=openid profile"
             "{session_option}"
         ).format(
             host=self.REST_HOST,

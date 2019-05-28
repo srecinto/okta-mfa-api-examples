@@ -1,6 +1,7 @@
 import os
 import config
 import json
+import time
 
 from flask import Flask, request, send_from_directory, redirect, make_response, render_template
 from utils.rest import OktaUtil
@@ -297,6 +298,125 @@ def push_mfa_code():
     return json.dumps(response)
 
 
+@app.route('/push_mfa_code_no_reset', methods=["POST"])
+def push_mfa_code_no_reset():
+    print "push_mfa_code_no_reset()"
+    request_json = request.get_json()
+    print "request_json: {0}".format(request_json)
+    okta_util = OktaUtil(request.headers, config.okta)
+    
+    username = request_json["username"]
+    factor_type = request_json["factorType"]
+    verification_url = request_json["verificationUrl"]
+    code = None
+    if "code" in request_json:
+        code = request_json["code"]
+    
+    user = okta_util.get_user(username)
+    # print "user: {0}".format(user, indent=4, sort_keys=True)
+    
+    response = {"status": "success", "message": "sent"} # alwasy send this down so a malicious user can not farm enrolled factors
+    
+    if("id" in user):
+        okta_user_id = user["id"]
+
+        if verification_url:
+            #push_response = okta_util.activate_sms_factor_by_id(okta_factor_id, code)
+            #push_response = okta_util.push_factor_verification(okta_user_id, okta_factor_id, code)
+            push_response = okta_util.activate_sms_factor(verification_url, code)
+            print "push_response: {0}".format(json.dumps(push_response, indent=4, sort_keys=True))
+            
+            # Check for a valid factor result
+            if "factorResult" in push_response:
+                response["factorResult"] = push_response["factorResult"]
+                
+                # check if there is a polling link to send back down to the client
+                if "_links" in push_response:
+                    if "poll" in push_response["_links"]:
+                        response["pollingUrl"] = push_response["_links"]["poll"]["href"]
+                 
+                print "factorResult: {0}".format(push_response["factorResult"])       
+                if push_response["factorResult"] == "SUCCESS": 
+                    response["status"] = "success";
+            elif "status" in push_response:
+                print "HAS STATUS"
+                if push_response["status"] == "ACTIVE":
+                    response["status"] = "success";
+                    response["factorResult"] = "SUCCESS";
+            else:
+                response["status"] = "failed"
+                response["message"] = push_response["errorSummary"]
+        else:
+            print "WARNING: User '{0}' not enrolled in factor: {1}".format(user["profile"]["login"], factor_type)
+    else:
+        print "WARNING: User '{0}' does not exsist in Okta".format(username)
+    
+    return json.dumps(response)
+
+
+@app.route('/push_multi_sms_mfa_code', methods=["POST"])
+def push_multi_sms_mfa_code():
+    print "push_multi_sms_mfa_code()"
+    has_valid_sms = False
+    request_json = request.get_json()
+    print "request_json: {0}".format(request_json)
+    user_name = request_json["username"]
+    selected_sms_number = request_json["smsNumber"]
+    
+    okta_util = OktaUtil(request.headers, config.okta)
+    user = okta_util.get_user(user_name)
+    # print "user: {0}".format(json.dumps(user, indent=4, sort_keys=True))
+    
+    response = {"status": "success", "message": "sent"} # alwasy send this down so a malicious user can not farm enrolled factors
+    
+    if("id" in user):
+        okta_user_id = user["id"]
+        okta_factor_id = None
+        
+        # 1) Verify Phone Number is valid in list
+        if "profile" in user:
+            if config.okta["multi_sms_allowed_numbers"] in user["profile"]:
+                if selected_sms_number in user["profile"][config.okta["multi_sms_allowed_numbers"]]:
+                    has_valid_sms = True
+        
+        # 2) Enroll or re-enroll number
+        enrolled_factors = okta_util.list_factors(okta_user_id)
+        print "enrolled_factors: {0}".format(json.dumps(enrolled_factors, indent=4, sort_keys=True))
+        for factor in enrolled_factors:
+            # check factor type agains the enroled factor
+            if (factor["factorType"] == "sms"):
+                okta_factor_id = factor["id"]
+                break
+        
+        if okta_factor_id:
+            unenroll_factor_response = okta_util.unenroll_factor(okta_user_id, okta_factor_id)
+            # print "unenroll_factor_response: {0}".format(json.dumps(unenroll_factor_response, indent=4, sort_keys=True))
+        print "selected_sms_number: {0}".format(selected_sms_number)
+        factor_createion_response = okta_util.create_sms_factor(okta_user_id, selected_sms_number)
+        okta_factor_id = factor_createion_response["id"]
+        print "factor_createion_response: {0}".format(json.dumps(factor_createion_response, indent=4, sort_keys=True))
+        
+        if "_links" in factor_createion_response:
+            if "verify" in factor_createion_response["_links"]:
+                verify_url = factor_createion_response["_links"]["verify"]["href"]
+                push_factor_response = okta_util.factor_verification(verify_url, None)
+                response["verifyUrl"] = verify_url
+                
+            elif "activate" in factor_createion_response["_links"]:
+                verify_url = factor_createion_response["_links"]["activate"]["href"]
+                push_factor_response = okta_util.factor_verification(verify_url, None)
+                response["verifyUrl"] = verify_url
+        
+        #push_factor_response = okta_util.push_factor_verification(okta_user_id, okta_factor_id)
+        print "okta_factor_id: {0}".format(okta_factor_id)
+        print "factor_createion_response: {0}".format(json.dumps(factor_createion_response, indent=4, sort_keys=True))
+        
+    else:
+        print "WARNING: User '{0}' does not exsist in Okta".format(user_name)
+    
+    return json.dumps(response)
+
+
 @app.route('/mfa_verification_poll', methods=["POST"])
 def mfa_verification_poll():
     print "mfa_verification_poll()"
@@ -317,6 +437,31 @@ def mfa_verification_poll():
             response["ott"] = password_reset_response["resetPasswordUrl"].replace("{0}/reset_password/".format(config.okta["org_host"]), "")
     
     return json.dumps(response)
+
+
+@app.route('/mfa_multiple_sms_numbers', methods=["POST"])
+def mfa_multiple_sms_numbers():
+    print "mfa_multiple_sms_numbers()"
+    request_json = request.get_json()
+    print "request_json: {0}".format(json.dumps(request_json, indent=4, sort_keys=True))
+    user_name = request_json["userName"]
+    
+    okta_util = OktaUtil(request.headers, config.okta)
+    user = okta_util.get_user(user_name)
+    
+    print "user: {0}".format(json.dumps(user, indent=4, sort_keys=True))
+    
+    json_response = {
+        "primary_sms": "",
+        "available_sms_numbers": ""
+    }
+    
+    if "profile" in user:
+        if config.okta["multi_sms_allowed_numbers"] in user["profile"]:
+            json_response["primary_sms"] =  user["profile"][config.okta["multi_sms_primary_number"]]
+            json_response["available_sms_numbers"] =  user["profile"][config.okta["multi_sms_allowed_numbers"]]
+    
+    return json.dumps(json_response)
 
 """
 MAIN ##################################################################################################################
